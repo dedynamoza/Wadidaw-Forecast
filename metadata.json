@@ -1,0 +1,6 @@
+{
+  "name": "Sales Forecast Calculator",
+  "description": "A professional sales forecasting tool to project month-end net sales performance versus targets with real-time KPI dashboarding.",
+  "requestFramePermissions": ["clipboard-read", "clipboard-write"],
+  "majorCapabilities": []
+}

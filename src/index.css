@@ -1,0 +1,70 @@
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800;900&family=JetBrains+Mono:wght@400;500&family=Outfit:wght@300;400;500;600;700;800;900&display=swap');
+@import "tailwindcss";
+
+@theme {
+  --font-sans: "Inter", ui-sans-serif, system-ui, sans-serif;
+  --font-mono: "JetBrains Mono", ui-monospace, SFMono-Regular, monospace;
+}
+
+@layer base {
+  body {
+    @apply bg-white text-slate-900 antialiased min-h-screen overflow-x-hidden;
+  }
+}
+
+@layer components {
+  .futuristic-bg {
+    @apply transition-colors duration-500;
+    background-color: #17C3B2;
+    background-size: 40px 40px;
+    position: fixed;
+    inset: 0;
+    z-index: -1;
+  }
+
+  .glass-card {
+    background-color: white;
+    @apply shadow-2xl rounded-[2.5rem] border border-black/5 transition-all duration-300;
+  }
+
+  .dark-card {
+    background-color: #3D3D3D;
+    @apply text-white shadow-2xl rounded-[2.5rem] border border-white/5 transition-all duration-300;
+  }
+
+  .glass-input {
+    background-color: white;
+    @apply border-none rounded-sm shadow-inner focus:ring-4 focus:ring-[#D4FF00]/50 outline-none transition-all text-slate-800 placeholder-slate-400 font-bold;
+  }
+
+  .accent-text {
+    @apply text-[#D4FF00];
+  }
+
+  .accent-btn {
+    @apply bg-[#D4FF00] text-slate-900 hover:brightness-110 transition-all font-black uppercase tracking-widest px-8 py-4 rounded-full shadow-lg;
+  }
+
+  .neon-text {
+    @apply text-blue-600;
+  }
+
+  .neon-border {
+    @apply shadow-sm;
+  }
+}
+
+/* Custom scrollbar */
+::-webkit-scrollbar {
+  width: 6px;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+::-webkit-scrollbar-thumb {
+  background: rgba(255, 255, 255, 0.05);
+  border-radius: 10px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: rgba(255, 255, 255, 0.1);
+}
