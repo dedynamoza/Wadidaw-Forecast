@@ -1,17 +1,36 @@
-name: Deploy to Google AI Studio
+name: Google AI Studio Deploy
+
 on:
   push:
-    branches: [ main ]
+    branches: [ "main" ]
 
 jobs:
   build:
     runs-on: ubuntu-latest
+    
+    # Bagian ini untuk memaksa sistem pakai Node 24 agar tidak ada warning
     env:
       FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+
     steps:
-      - uses: actions/checkout@v5
-      - name: Use Node.js
-        uses: actions/setup-node@v4 # Gunakan v4 untuk support Node 20+
+      # Update ke v5
+      - name: Checkout Repository
+        uses: actions/checkout@v5
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
         with:
-          node-version: '20'
-      # Tambahkan step build Anda di sini
+          node-version: '24' # Menggunakan versi terbaru
+
+      - name: Install and Build
+        run: |
+          npm install
+          # Jika ada perintah build, masukkan di sini. Jika tidak, abaikan.
+          # npm run build 
+
+      # Update ke v5
+      - name: Upload Artifact
+        uses: actions/upload-artifact@v5
+        with:
+          name: web-app
+          path: .
