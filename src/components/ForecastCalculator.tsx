@@ -56,11 +56,14 @@ const translations = {
     estimateTo: "Estimasi Sampai",
     efficiency: "Efisiensi Target (%)",
     multiplier: "Pengali Estimasi",
+    termination: "Estimasi Terminasi (%)",
     reset: "Reset Data",
     calculate: "Hitung Prediksi",
     readyTitle: "Siap Menghitung",
     readyDesc: "Silakan masukkan data penjualan dan target untuk melihat estimasi.",
     summaryTitle: "Ringkasan Eksekutif",
+    summaryLinearTitle: "Skenario 1: Tanpa Terminasi (Linear)",
+    summaryTerminatedTitle: "Skenario 2: Dengan Terminasi ({percent}%)",
     achievement: "Estimasi Pencapaian",
     table: {
       title: "Tabel Rincian Prediksi",
@@ -101,11 +104,14 @@ const translations = {
     estimateTo: "Estimate Until",
     efficiency: "Target Efficiency (%)",
     multiplier: "Estimation Multiplier",
+    termination: "Termination Estimate (%)",
     reset: "Reset Data",
     calculate: "Calculate Forecast",
     readyTitle: "Ready to Calculate",
     readyDesc: "Please enter sales and target data to see estimations.",
     summaryTitle: "Executive Summary",
+    summaryLinearTitle: "Scenario 1: No Termination (Linear)",
+    summaryTerminatedTitle: "Scenario 2: With Termination ({percent}%)",
     achievement: "Estimated Achievement",
     table: {
       title: "Prediction Details Table",
@@ -146,11 +152,10 @@ export function ForecastCalculator() {
   
   // App states
   const [lang, setLang] = useState<"id" | "en">("id");
-  const [enableTargetPercent, setEnableTargetPercent] = useState<boolean>(false);
   const t = translations[lang];
 
   // Rest of state
-  const [targetPercent, setTargetPercent] = useState<number>(100);
+  const [terminationPercent, setTerminationPercent] = useState<string>("0");
   const [calculatedData, setCalculatedData] = useState<any>(null);
   const [showPasteError, setShowPasteError] = useState<boolean>(false);
   
@@ -199,34 +204,39 @@ export function ForecastCalculator() {
 
     const avgHarian = hariBerjalan > 0 ? net / hariBerjalan : 0;
     
-    // Required to reach Simulated Target Percent
-    // If slider is 100%, we calculate what's needed for 100% target
-    const simulateTargetValue = target * (targetPercent / 100);
-    const gap = Math.max(0, simulateTargetValue - net);
+    // Forecast total based on CURRENT average (Linear)
+    const forecastTotalLinear = net + (avgHarian * Math.max(0, sisaHari - 1));
+    const persentaseLinear = (forecastTotalLinear / target) * 100;
+
+    // Forecast total with TERMINATION reduction
+    const normalizedTermination = terminationPercent.replace(',', '.');
+    const terminasiVal = parseFloat(normalizedTermination) || 0;
+    const forecastTotalTerminated = forecastTotalLinear * (1 - terminasiVal / 100);
+    const persentaseTerminated = (forecastTotalTerminated / target) * 100;
+
+    // Required for 100% Target achievement (Original target)
+    const gap = Math.max(0, target - net);
     const requiredAvg = sisaHari > 1 ? gap / (sisaHari - 1) : gap;
 
-    // Forecast total based on CURRENT average
-    const forecastTotalNormal = net + (avgHarian * Math.max(0, sisaHari - 1));
-    
     // Generate chart data for visualization
     const chartData = [];
-    const points = Math.min(sisaHari, 30); // Max 30 points to keep chart clean
+    const points = Math.min(sisaHari, 30); 
     const step = Math.max(1, Math.floor(sisaHari / points));
     
     for (let i = 0; i < sisaHari; i += step) {
         const currentDate = addDays(dateStart, i);
         const projectedValue = net + (avgHarian * i);
-        const targetLine = net + (requiredAvg * i);
+        const terminatedValue = projectedValue * (1 - (terminasiVal / 100) * (i / Math.max(1, sisaHari-1))); // Linear decay of termination impact? 
+        // User said: "Forecast akhir netsales dikurangi 10%" 
+        // Let's use a simple end-point reduction for the chart to show the gap
         
         chartData.push({
             name: format(currentDate, "d MMM"),
             forecast: Number((projectedValue / 10000).toFixed(2)),
-            required: Number((targetLine / 10000).toFixed(2)),
+            terminated: Number(((projectedValue * (1 - terminasiVal / 100)) / 10000).toFixed(2)),
             fullDate: format(currentDate, "yyyy-MM-dd")
         });
     }
-
-    const currentPersentase = (forecastTotalNormal / target) * 100;
 
     setCalculatedData({
       hariBerjalan,
@@ -235,14 +245,17 @@ export function ForecastCalculator() {
       avgHarian,
       requiredAvg,
       gap,
-      forecastTotal: forecastTotalNormal,
-      persentase: currentPersentase,
+      forecastTotalLinear,
+      persentaseLinear,
+      forecastTotalTerminated,
+      persentaseTerminated,
       target,
       net,
       chartData,
       date: dateStart,
       dateEnd: dateEnd,
-      targetPercent
+      terminationPercent: terminasiVal,
+      terminationPercentDisplay: terminationPercent || "0"
     });
   };
 
@@ -251,13 +264,17 @@ export function ForecastCalculator() {
     
     try {
       const doc = new jsPDF() as any;
-      const { net, target, forecastTotal, avgHarian, requiredAvg, gap, sisaHari, date, dateEnd, targetPercent } = calculatedData;
+      const { 
+        net, target, forecastTotalLinear, persentaseLinear, 
+        forecastTotalTerminated, persentaseTerminated, 
+        avgHarian, sisaHari, date, dateEnd, terminationPercent 
+      } = calculatedData;
       const locale = lang === 'id' ? id : enUS;
 
       // Header
       doc.setFontSize(22);
       doc.setTextColor(30, 41, 59);
-      doc.text(lang === 'id' ? "Laporan Prediksi Penjualan" : "Sales Forecast Report", 14, 22);
+      doc.text(t.title, 14, 22);
       
       doc.setFontSize(10);
       doc.setTextColor(100, 116, 139);
@@ -266,35 +283,45 @@ export function ForecastCalculator() {
       // Info Table
       const infoData = [
         [lang === 'id' ? "Periode Forecast" : "Forecast Period", `${format(date, "dd MMM yyyy", { locale })} - ${format(dateEnd, "dd MMM yyyy", { locale })}`],
-        [lang === 'id' ? "Total Hari Estimasi" : "Total Estimation Days", `${sisaHari} ${lang === 'id' ? "Hari" : "Days"}`],
-        [lang === 'id' ? "Unit Mata Uang" : "Currency Unit", "IDR (Rupiah)"]
+        [lang === 'id' ? "Total Hari Estimasi" : "Total Estimation Days", `${sisaHari} ${lang === 'id' ? "Hari" : "Days"}`]
       ];
+      
+      if (terminationPercent > 0) {
+        infoData.push([lang === 'id' ? "Persentase Terminasi" : "Termination Percent", `${calculatedData.terminationPercentDisplay}%`]);
+      }
       
       autoTable(doc, {
         startY: 38,
         head: [[lang === 'id' ? 'Deskripsi' : 'Description', lang === 'id' ? 'Informasi' : 'Information']],
         body: infoData,
         theme: 'striped',
-        headStyles: { fillColor: [59, 130, 246] }
+        headStyles: { fillColor: [23, 195, 178] }
       });
       
       // Values Table
       const valuesData = [
-        [lang === 'id' ? "Total Penjualan Saat Ini" : "Total Current Sales", formatCurrencyIDR(net)],
+        [lang === 'id' ? "Penjualan Saat Ini" : "Current Sales", formatCurrencyIDR(net)],
         [lang === 'id' ? "Target Bulanan" : "Monthly Target", formatCurrencyIDR(target)],
-        [lang === 'id' ? "Rata-rata Penjualan Per Hari" : "Daily Sales Average", formatCurrencyIDR(avgHarian)],
-        [lang === 'id' ? "Prediksi Akhir (Linear)" : "Final Prediction (Linear)", formatCurrencyIDR(forecastTotal)],
-        [lang === 'id' ? "Pencapaian Target (%)" : "Target Achievement (%)", `${(forecastTotal / target * 100).toFixed(1)}%`]
+        [lang === 'id' ? "Rata-rata Harian" : "Daily Average", formatCurrencyIDR(avgHarian)],
+        ["", ""],
+        [lang === 'id' ? "Prediksi Akhir (Linear)" : "Final Prediction (Linear)", formatCurrencyIDR(forecastTotalLinear)],
+        [lang === 'id' ? "Pencapaian (Linear)" : "Achievement (Linear)", `${persentaseLinear.toFixed(1)}%`]
       ];
-      
-      if (gap > 0) {
-        valuesData.push([lang === 'id' ? "Kekurangan ke Target" : "Target Shortfall", formatCurrencyIDR(gap)]);
-        valuesData.push([lang === 'id' ? `Rata-rata Perlu (untuk hit ${targetPercent}%)` : `Required Average (to hit ${targetPercent}%)`, formatCurrencyIDR(requiredAvg)]);
+
+      if (calculatedData.gap > 0) {
+        valuesData.push([lang === 'id' ? "Sisa Perlu ke Target" : "Remaining for Target", formatCurrencyIDR(calculatedData.gap)]);
+        valuesData.push([lang === 'id' ? "Rata-rata Perlu Harian" : "Required Daily Average", formatCurrencyIDR(calculatedData.requiredAvg)]);
+      }
+
+      if (terminationPercent > 0) {
+        valuesData.push(["", ""]);
+        valuesData.push([lang === 'id' ? `Prediksi Akhir (Terminasi ${calculatedData.terminationPercentDisplay}%)` : `Final Prediction (Terminated ${calculatedData.terminationPercentDisplay}%)`, formatCurrencyIDR(forecastTotalTerminated)]);
+        valuesData.push([lang === 'id' ? `Pencapaian (Terminasi ${calculatedData.terminationPercentDisplay}%)` : `Achievement (Terminated ${calculatedData.terminationPercentDisplay}%)`, `${persentaseTerminated.toFixed(1)}%`]);
       }
       
       autoTable(doc, {
         startY: (doc as any).lastAutoTable.finalY + 10,
-        head: [[lang === 'id' ? 'Parameter Keuangan' : 'Financial Parameter', lang === 'id' ? 'Nilai' : 'Value']],
+        head: [[lang === 'id' ? 'Parameter' : 'Parameter', lang === 'id' ? 'Nilai' : 'Value']],
         body: valuesData,
         theme: 'grid',
         headStyles: { fillColor: [30, 41, 59] }
@@ -307,10 +334,18 @@ export function ForecastCalculator() {
       
       doc.setFontSize(11);
       doc.setTextColor(51, 65, 85);
-      const splitText = doc.splitTextToSize(summaryText, 180);
-      doc.text(splitText, 14, (doc as any).lastAutoTable.finalY + 22);
+      const summaries = [summaryLinearText];
+      if (terminationPercent > 0) summaries.push(summaryTerminatedText);
       
-      doc.save(`Forecast-${format(new Date(), "yyyyMMdd")}.pdf`);
+      let currentY = (doc as any).lastAutoTable.finalY + 22;
+      
+      summaries.forEach((text, i) => {
+        const splitText = doc.splitTextToSize(text, 180);
+        doc.text(splitText, 14, currentY);
+        currentY += splitText.length * 7 + 5;
+      });
+      
+      doc.save(`Forecast-Wadidaw-${format(new Date(), "yyyyMMdd")}.pdf`);
     } catch (err) {
       console.error("Export failed", err);
     }
@@ -321,8 +356,7 @@ export function ForecastCalculator() {
     setTargetSales("");
     setStartDate(format(new Date(), "yyyy-MM-dd"));
     setEndDate(format(endOfMonth(new Date()), "yyyy-MM-dd"));
-    setEnableTargetPercent(false);
-    setTargetPercent(100);
+    setTerminationPercent("0");
     setCalculatedData(null);
   };
 
@@ -332,19 +366,34 @@ export function ForecastCalculator() {
     return { label: "CRITICAL", classes: "bg-rose-500/10 text-rose-600 border-rose-500/20" };
   };
 
-  const summaryText = useMemo(() => {
+  const summaryLinearText = useMemo(() => {
     if (!calculatedData) return "";
-    
-    const { net, target, sisaHari, date, dateEnd, forecastTotal, persentase, targetPercent, requiredAvg, gap } = calculatedData;
+    const { net, target, sisaHari, date, dateEnd, forecastTotalLinear, persentaseLinear, requiredAvg } = calculatedData;
     const locale = lang === 'id' ? id : enUS;
     const rangeText = `${format(date, "d MMM", { locale })} - ${format(dateEnd, "d MMM yyyy", { locale })}`;
     
-    let base = `${t.summaryText.current} Rp ${formatMillion(net)}. ${t.summaryText.remaining.replace('{days}', sisaHari.toString()).replace('{range}', rangeText).replace('{total}', `Rp ${formatMillion(forecastTotal)}`).replace('{percent}', persentase.toFixed(1))}`;
+    let base = `${t.summaryText.current} Rp ${formatMillion(net)}. ${t.summaryText.remaining.replace('{days}', sisaHari.toString()).replace('{range}', rangeText).replace('{total}', `Rp ${formatMillion(forecastTotalLinear)}`).replace('{percent}', persentaseLinear.toFixed(1))}`;
     
-    if (gap > 0) {
-        base += " " + t.summaryText.required.replace('{target}', targetPercent.toString()).replace('{avg}', `Rp ${formatMillion(requiredAvg)}`);
+    // Always include the required average message if we have sisa hari
+    if (sisaHari >= 0) {
+      base += " " + t.summaryText.required.replace('{target}', "100").replace('{avg}', formatCurrencyIDR(requiredAvg));
     }
     
+    return base;
+  }, [calculatedData, lang]);
+
+  const summaryTerminatedText = useMemo(() => {
+    if (!calculatedData) return "";
+    const { net, target, sisaHari, date, dateEnd, forecastTotalTerminated, persentaseTerminated, terminationPercent, requiredAvg } = calculatedData;
+    const locale = lang === 'id' ? id : enUS;
+    const rangeText = `${format(date, "d MMM", { locale })} - ${format(dateEnd, "d MMM yyyy", { locale })}`;
+    
+    let base = `${lang === 'id' ? 'Dan jika dengan asumsi penurunan terminasi' : 'And If assuming termination reduction'} ${terminationPercent}%, ${t.summaryText.remaining.replace('{days}', sisaHari.toString()).replace('{range}', rangeText).replace('{total}', `Rp ${formatMillion(forecastTotalTerminated)}`).replace('{percent}', persentaseTerminated.toFixed(1))}`;
+    
+    if (sisaHari >= 0) {
+      base += " " + t.summaryText.required.replace('{target}', "100").replace('{avg}', formatCurrencyIDR(requiredAvg));
+    }
+
     return base;
   }, [calculatedData, lang]);
 
@@ -495,58 +544,37 @@ export function ForecastCalculator() {
                     </div>
                   </div>
                 </div>
-              </div>
-            </div>
-  
-            <div className="pt-6 border-t border-white/10 space-y-4" id="target-percent-section">
-              <div className="flex items-center justify-between">
-                <div className="flex flex-col">
-                  <label className="text-[10px] font-black text-white uppercase tracking-[0.2em]">{t.efficiency}</label>
-                  <span className="text-[8px] text-white/40 font-bold uppercase tracking-widest">{t.multiplier}</span>
+
+                <div className="space-y-2" id="field-termination">
+                  <label className="text-[10px] font-black text-white/50 uppercase tracking-[0.2em]">{t.termination}</label>
+                  <div className="relative">
+                    <input
+                      type="text"
+                      inputMode="decimal"
+                      value={terminationPercent}
+                      onChange={(e) => {
+                        const val = e.target.value.replace(/[^0-9,.]/g, "");
+                        const normalized = val.replace(',', '.');
+                        
+                        // Basic validation: must be a number or a partial number (like '0.' or '.')
+                        // And must be <= 100
+                        const isPartial = val === "" || val === "." || val === ",";
+                        const isValidNum = !isNaN(parseFloat(normalized)) && parseFloat(normalized) <= 100;
+                        
+                        if (isPartial || isValidNum) {
+                          // Check if there's only one dot or comma
+                          if ((val.match(/[,.]/g) || []).length <= 1) {
+                            setTerminationPercent(val);
+                          }
+                        }
+                      }}
+                      placeholder="0"
+                      className="w-full px-4 py-3 glass-input text-lg"
+                    />
+                    <div className="absolute top-1/2 right-4 -translate-y-1/2 text-[10px] font-black text-white/30 uppercase tracking-[0.2em]">%</div>
+                  </div>
                 </div>
-                <button
-                  onClick={() => setEnableTargetPercent(!enableTargetPercent)}
-                  className={cn(
-                    "w-12 h-6 rounded-full transition-all relative flex items-center px-1 shadow-inner",
-                    enableTargetPercent ? "bg-[#D4FF00]" : "bg-white/10"
-                  )}
-                  id="toggle-target-percent"
-                >
-                  <div className={cn("w-4 h-4 rounded-full bg-white transition-all shadow-sm", enableTargetPercent ? "translate-x-6" : "translate-x-0")} />
-                </button>
               </div>
-  
-              <AnimatePresence>
-                {enableTargetPercent && (
-                  <motion.div
-                    initial={{ opacity: 0, y: -10 }}
-                    animate={{ opacity: 1, y: 0 }}
-                    exit={{ opacity: 0, y: -10 }}
-                    className="space-y-4"
-                    id="target-percent-controls"
-                  >
-                    <div className="flex items-center gap-4">
-                      <input
-                        type="range"
-                        min="1"
-                        max="200"
-                        value={targetPercent}
-                        onChange={(e) => setTargetPercent(parseInt(e.target.value))}
-                        className="flex-1 h-2 bg-white/10 rounded-lg appearance-none cursor-pointer accent-[#D4FF00]"
-                      />
-                      <div className="relative w-20">
-                        <input
-                          type="number"
-                          value={targetPercent}
-                          onChange={(e) => setTargetPercent(Math.min(200, Math.max(1, parseInt(e.target.value) || 0)))}
-                          className="w-full py-2 px-2 glass-input text-center text-xs font-black outline-none"
-                        />
-                        <span className="absolute right-2 top-1/2 -translate-y-1/2 text-[10px] font-black text-slate-400">%</span>
-                      </div>
-                    </div>
-                  </motion.div>
-                )}
-              </AnimatePresence>
             </div>
   
             <div className="grid grid-cols-2 gap-4 pt-4" id="action-buttons">
@@ -584,32 +612,72 @@ export function ForecastCalculator() {
           ) : (
             <div ref={dashboardRef} className="space-y-6" id="dashboard-content">
               {/* Summary Text Panel */}
-              <motion.div
-                initial={{ opacity: 0, scale: 0.98 }}
-                animate={{ opacity: 1, scale: 1 }}
-                className="bg-white p-8 rounded-[2.5rem] text-slate-900 shadow-xl relative overflow-hidden flex flex-col items-center text-center gap-4"
-                id="summary-panel"
-              >
-                <div className="p-4 bg-[#17C3B2]/10 rounded-full">
-                  <TrendingUp size={32} className="text-[#17C3B2]" />
-                </div>
-                <div className="space-y-2">
-                  <h3 className="text-[10px] font-black uppercase tracking-[0.3em] text-[#17C3B2]">{t.summaryTitle}</h3>
-                  <p className="text-lg font-black leading-[1.6] text-slate-900 max-w-2xl px-4">
-                    {summaryText}
+              <div className="space-y-4" id="dual-summaries">
+                <motion.div
+                  initial={{ opacity: 0, scale: 0.98 }}
+                  animate={{ opacity: 1, scale: 1 }}
+                  className="bg-white p-8 rounded-[2.5rem] text-slate-900 shadow-xl relative overflow-hidden flex flex-col gap-4"
+                  id="summary-panel-linear"
+                >
+                  <div className="flex items-center gap-4">
+                    <div className="p-3 bg-[#17C3B2]/10 rounded-full">
+                      <TrendingUp size={24} className="text-[#17C3B2]" />
+                    </div>
+                    <div className="space-y-0.5">
+                      <h3 className="text-[10px] font-black uppercase tracking-[0.3em] text-[#17C3B2]">{t.summaryLinearTitle}</h3>
+                    </div>
+                  </div>
+                  <p className="text-base font-medium leading-[1.6] text-slate-700 max-w-4xl">
+                    {summaryLinearText}
                   </p>
-                </div>
-              </motion.div>
+                </motion.div>
+
+                {calculatedData.terminationPercent > 0 && (
+                  <motion.div
+                    initial={{ opacity: 0, scale: 0.98 }}
+                    animate={{ opacity: 1, scale: 1 }}
+                    transition={{ delay: 0.1 }}
+                    className="bg-slate-900 p-8 rounded-[2.5rem] text-white shadow-xl relative overflow-hidden flex flex-col gap-4 border border-white/5"
+                    id="summary-panel-terminated"
+                  >
+                    <div className="flex items-center gap-4">
+                      <div className="p-3 bg-[#D4FF00]/10 rounded-full">
+                        <TrendingUp size={24} className="text-[#D4FF00]" />
+                      </div>
+                      <div className="space-y-0.5">
+                        <h3 className="text-[10px] font-black uppercase tracking-[0.3em] text-[#D4FF00]">
+                          {t.summaryTerminatedTitle.replace('{percent}', calculatedData.terminationPercent)}
+                        </h3>
+                      </div>
+                    </div>
+                    <p className="text-base font-normal leading-[1.6] text-white/80 max-w-4xl">
+                      {summaryTerminatedText}
+                    </p>
+                  </motion.div>
+                )}
+              </div>
   
               {/* Progress Panel */}
-              <div className="glass-card p-8 space-y-4 shadow-lg shadow-black/5" id="progress-indicator-section">
-                <div className="flex justify-between items-end">
-                  <div className="space-y-1">
-                    <h3 className="text-[10px] font-black text-slate-400 uppercase tracking-[0.3em]">{t.achievement}</h3>
-                    <p className="text-3xl font-black text-slate-900">{calculatedData.persentase.toFixed(1)}%</p>
+              <div className="glass-card p-8 space-y-6 shadow-lg shadow-black/5" id="progress-indicator-section">
+                <div className="space-y-6">
+                  <div className="space-y-2">
+                    <div className="flex justify-between items-end">
+                      <h3 className="text-[10px] font-black text-slate-400 uppercase tracking-[0.3em]">{t.achievement} ({t.table.linear})</h3>
+                      <p className={cn("font-bold text-slate-600", calculatedData.terminationPercent > 0 ? "text-xl" : "text-3xl")}>{calculatedData.persentaseLinear.toFixed(1)}%</p>
+                    </div>
+                    <ProgressBar progress={calculatedData.persentaseLinear} className="py-0" barClassName="bg-slate-300" />
                   </div>
+                  
+                  {calculatedData.terminationPercent > 0 && (
+                    <div className="space-y-2 pt-2 border-t border-slate-100">
+                      <div className="flex justify-between items-end">
+                        <h3 className="text-[10px] font-black text-[#17C3B2] uppercase tracking-[0.3em]">{t.achievement} ({calculatedData.terminationPercentDisplay}%)</h3>
+                        <p className="text-3xl font-black text-[#17C3B2]">{calculatedData.persentaseTerminated.toFixed(1)}%</p>
+                      </div>
+                      <ProgressBar progress={calculatedData.persentaseTerminated} className="py-0" barClassName="bg-[#17C3B2]" />
+                    </div>
+                  )}
                 </div>
-                <ProgressBar progress={calculatedData.persentase} className="py-2" barClassName="bg-[#17C3B2]" />
               </div>
   
               {/* Advanced Data Table  */}
@@ -633,29 +701,29 @@ export function ForecastCalculator() {
                       <tr className="hover:bg-[#17C3B2]/5 transition-colors">
                         <td className="px-8 py-5 font-black text-slate-600 tracking-wider">
                           <div className="flex items-center gap-3">
-                            <div className="w-2 h-2 rounded-full bg-[#17C3B2] shadow-sm" />
+                            <div className="w-2 h-2 rounded-full bg-slate-400 shadow-sm" />
                             {t.table.linear}
                           </div>
                         </td>
                         <td className="px-8 py-5 text-right tabular-nums text-slate-500 font-medium">{formatMillion(calculatedData.net)}</td>
                         <td className="px-8 py-5 text-right tabular-nums text-slate-500 font-medium">{formatMillion(calculatedData.avgHarian * (calculatedData.sisaHari - 1))}</td>
-                        <td className="px-8 py-5 text-right tabular-nums text-[#17C3B2] font-black">{formatMillion(calculatedData.forecastTotal)}</td>
+                        <td className="px-8 py-5 text-right tabular-nums text-slate-500 font-bold">{formatMillion(calculatedData.forecastTotalLinear)}</td>
                         <td className="px-8 py-5 text-right tabular-nums text-slate-900 font-black">{formatMillion(calculatedData.target)}</td>
                       </tr>
-                      {(calculatedData.gap > 0 || enableTargetPercent) && (
-                        <tr className="bg-[#D4FF00]/10">
-                          <td className="px-8 py-5 font-black text-slate-900 tracking-widest">
+                      {calculatedData.terminationPercent > 0 && (
+                        <tr className="bg-[#17C3B2]/5">
+                          <td className="px-8 py-5 font-black text-[#17C3B2] tracking-widest">
                             <div className="flex items-center gap-3">
-                               <div className="w-2 h-2 rounded-full bg-[#D4FF00] shadow-sm" />
+                               <div className="w-2 h-2 rounded-full bg-[#17C3B2] shadow-sm" />
                                <span className="flex items-center gap-2">
-                                 {t.table.adjusted}
-                                 <span className="text-[9px] bg-[#D4FF00] text-slate-900 px-2 py-0.5 rounded-md font-black">{calculatedData.targetPercent}%</span>
+                                 {lang === 'id' ? 'Non Linear' : 'Non Linear Est'}
+                                 <span className="text-[9px] bg-[#17C3B2] text-white px-2 py-0.5 rounded-md font-black">-{calculatedData.terminationPercentDisplay}%</span>
                                </span>
                             </div>
                           </td>
                           <td className="px-8 py-5 text-right tabular-nums text-slate-500 font-medium">{formatMillion(calculatedData.net)}</td>
-                          <td className="px-8 py-5 text-right tabular-nums text-slate-500 font-medium">{formatMillion(calculatedData.gap)}</td>
-                          <td className="px-8 py-5 text-right tabular-nums text-[#17C3B2] font-black">{formatMillion(calculatedData.target * (calculatedData.targetPercent/100))}</td>
+                          <td className="px-8 py-5 text-right tabular-nums text-slate-500 font-medium">{formatMillion((calculatedData.avgHarian * (calculatedData.sisaHari - 1)) * (1 - calculatedData.terminationPercent / 100))}</td>
+                          <td className="px-8 py-5 text-right tabular-nums text-[#17C3B2] font-black">{formatMillion(calculatedData.forecastTotalTerminated)}</td>
                           <td className="px-8 py-5 text-right tabular-nums text-slate-900 font-black">{formatMillion(calculatedData.target)}</td>
                         </tr>
                       )}
@@ -666,27 +734,29 @@ export function ForecastCalculator() {
   
               {/* KPI Grid */}
               <div className="grid grid-cols-1 md:grid-cols-2 gap-6" id="kpi-grid">
-                <div className="glass-card p-8 flex flex-col gap-6 shadow-lg shadow-black/5">
-                   <div className="w-12 h-12 bg-[#17C3B2] text-white rounded-2xl flex items-center justify-center shadow-md">
+                <div className={cn("glass-card p-8 flex flex-col gap-6 shadow-lg shadow-black/5", calculatedData.terminationPercent > 0 ? "" : "md:col-span-2 items-center text-center")}>
+                   <div className="w-12 h-12 bg-slate-300 text-white rounded-2xl flex items-center justify-center shadow-md">
                       <TrendingUp size={24} />
                    </div>
                    <div className="space-y-1">
-                      <h3 className="text-[10px] font-black text-slate-400 uppercase tracking-[0.3em]">{t.cards.forecast}</h3>
-                      <p className="text-2xl font-black text-slate-900">{formatMillion(calculatedData.forecastTotal)}</p>
+                      <h3 className="text-[10px] font-black text-slate-400 uppercase tracking-[0.3em]">{t.cards.forecast} (Linear)</h3>
+                      <p className="text-2xl font-black text-slate-900">{formatMillion(calculatedData.forecastTotalLinear)}</p>
                       <p className="text-[10px] font-bold text-slate-400 uppercase opacity-60 tracking-wider font-medium">{t.cards.forecastDesc}</p>
                    </div>
                 </div>
   
-                <div className="glass-card p-8 flex flex-col gap-6 shadow-lg shadow-black/5">
-                   <div className="w-12 h-12 bg-[#3D3D3D] text-[#D4FF00] rounded-2xl flex items-center justify-center shadow-md">
-                      <BarChart3 size={24} />
-                   </div>
-                   <div className="space-y-1">
-                      <h3 className="text-[10px] font-black text-slate-400 uppercase tracking-[0.3em]">{t.cards.avg}</h3>
-                      <p className="text-2xl font-black text-slate-900">{formatMillion(calculatedData.avgHarian)}</p>
-                      <p className="text-[10px] font-bold text-slate-400 uppercase opacity-60 tracking-wider font-medium">{t.cards.avgDesc}</p>
-                   </div>
-                </div>
+                {calculatedData.terminationPercent > 0 && (
+                  <div className="glass-card p-8 flex flex-col gap-6 shadow-lg shadow-black/5">
+                    <div className="w-12 h-12 bg-[#17C3B2] text-white rounded-2xl flex items-center justify-center shadow-md">
+                        <BarChart3 size={24} />
+                    </div>
+                    <div className="space-y-1">
+                        <h3 className="text-[10px] font-black text-slate-400 uppercase tracking-[0.3em]">{t.cards.forecast} (Terminasi)</h3>
+                        <p className="text-2xl font-black text-slate-900">{formatMillion(calculatedData.forecastTotalTerminated)}</p>
+                        <p className="text-[10px] font-bold text-[#17C3B2] uppercase tracking-wider font-medium">-{calculatedData.terminationPercentDisplay}% Adjusted</p>
+                    </div>
+                  </div>
+                )}
               </div>
             </div>
           )}
